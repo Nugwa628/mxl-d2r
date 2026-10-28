@@ -13886,6 +13886,105 @@ def _goblin_round(mode, secs, rows, bad, shots):
     clean_area()
 
 
+TRISTRAM = 38
+GRISWOLD = 365  # Median's Griswold: Skill1-3 griswold_skill; its missile chain (3804 -> 3805 -> 3806 -> 3807, server hit 6) spawns
+GRISWOLD_TRAP = 2879  # griswold_2, a Trap-Poison blade trap that fires once (aip2 1) and dies
+
+
+class _PMC(ctypes.Structure):
+    _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD)] + [(n, ctypes.c_size_t) for n in (
+        "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage",
+        "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage", "PrivateUsage")]
+
+
+def game_private_mb():
+    """Private bytes of the game process in MB (None when it cannot be read)."""
+    pids = g.game_pids()
+    if not pids:
+        return None
+    h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pids[0])  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return None
+    try:
+        c = _PMC()
+        c.cb = ctypes.sizeof(c)
+        if not ctypes.windll.psapi.GetProcessMemoryInfo(h, ctypes.byref(c), c.cb):
+            return None
+        return c.PrivateUsage // (1 << 20)
+    finally:
+        ctypes.windll.kernel32.CloseHandle(h)
+
+
+def check_griswold():
+    """Bug #60: crash at Griswold (D2R.exe+0xF3D028, a model instance built from the full 12 MB Renderer Pool). Griswold attacks a
+    god-mode player in Tristram for MXL_GRISWOLD_SECS seconds (default 180); every 5 s the blade traps (class 2879) in reach, the live
+    missiles and the game's private bytes are read. PASS: the game stays up, no new crash file, the traps do not pile up."""
+    nm = "Griswold (bug #60) fights a god-mode character in Tristram; blade traps, missiles and memory stay bounded, no crash"
+    if not need_game():
+        return add(nm, "BLOCKED", "not in a game")
+    secs = int(os.environ.get("MXL_GRISWOLD_SECS", "180"))
+    revive_if_dead()
+    enable_debug()
+    crashes0 = sorted(os.listdir(g.CRASH_DIR)) if os.path.isdir(g.CRASH_DIR) else []
+    mark = log_mark()
+    god(True)
+    bad, rows, shots = [], [], []
+    st = goto(TRISTRAM)
+    if st["player"].get("area") != TRISTRAM:
+        god(False)
+        return add(nm, "BLOCKED", "the character did not reach Tristram (area %s)" % st["player"].get("area"))
+    boss = next((m for m in st["mons"] if m.get("class") == GRISWOLD), None)
+    how = "Tristram's own"
+    if boss is None:
+        _spawn_near(GRISWOLD, st)
+        time.sleep(2.0)
+        boss = next((m for m in hstate()["mons"] if m.get("class") == GRISWOLD), None)
+        how = "spawned"
+    if boss is None:
+        god(False)
+        return add(nm, "BLOCKED", "no Griswold (class %d) in reach and the spawn made none" % GRISWOLD)
+    H("missiles reset")
+    H("moveto %d" % boss["id"])
+    t0, samples, traps_max, mis_max = time.time(), [], 0, 0
+    mem0 = game_private_mb()
+    while time.time() - t0 < secs:
+        time.sleep(5.0)
+        if not game_alive():
+            bad.append("the game died %.0f s into the fight" % (time.time() - t0))
+            break
+        st = hstate()
+        traps = sum(1 for m in st["mons"] if m.get("class") == GRISWOLD_TRAP)
+        ok, ml = H("missiles")
+        mm = re.search(r"live=(\d+)", " ".join(ml))
+        live = int(mm.group(1)) if mm else -1
+        mem = game_private_mb()
+        traps_max, mis_max = max(traps_max, traps), max(mis_max, live)
+        samples.append("%ds traps=%d missiles=%d mem=%sMB" % (time.time() - t0, traps, live, mem))
+        if not any(m.get("id") == boss["id"] for m in st["mons"]):
+            H("moveto %d" % boss["id"])
+        if len(samples) == 3:
+            shots.append(sh("griswold_fight"))
+    g.log("griswold: " + "; ".join(samples))
+    if game_alive():
+        _ok, ml = H("missiles")
+        seen = " ".join(ml)
+        rows.append("Griswold %s id %s, %d s, traps in reach max %d, live missiles max %d, private bytes %s -> %s MB; %s" % (
+            how, boss["id"], secs, traps_max, mis_max, mem0, game_private_mb(), seen[-200:]))
+        if traps_max > 40:
+            bad.append("%d blade traps in reach at once (they pile up)" % traps_max)
+        H("kill %d" % boss["id"])
+        time.sleep(2.0)
+        clean_area()
+        god(False)
+    crashes = [c for c in (sorted(os.listdir(g.CRASH_DIR)) if os.path.isdir(g.CRASH_DIR) else []) if c not in crashes0]
+    if crashes:
+        bad.append("new crash files: %s" % crashes[:4])
+    asserts = sorted(set(assertions_since(mark)))
+    add(nm, "PASS" if not bad else "FAIL", "; ".join(rows + samples[-3:]) + (
+        "; asserts in d2rloader.log: %s" % asserts[:4] if asserts else "; no new assert") + (
+        ("; PROBLEMS: " + "; ".join(bad)) if bad else ""), shots, samples)
+
+
 def check_goblincrash():
     """Bug #46: hard crash when a treasure goblin appears. Six goblin types are spawned in the Blood Moor in HD and in legacy graphics,
     run for MXL_GOBLIN_SECS seconds (default 20), die; then the plugin's roll spawns one (start the game with MXL_GOBLINS_FORCE=1 for
@@ -14111,6 +14210,21 @@ def check_transguard():
         line[:110], seen0.group(1) if seen0 else "?", seen0.group(2) if seen0 else "?", m.group(0) if m else " ".join(l1)[:80]), [], log)
 
 
+def check_renderpool():
+    """Renderer Pool fallback (plugin/src/render_pool.cpp, docs/bugs.md #60): the `mxl` line says on with the pool's size, and a probe
+    block goes through the wrapped vtable (heap block, realloc, size, free) and leaves the live counters where they were."""
+    nm = "Renderer Pool fallback (D2R.exe+0xF3D028 crash): the vtable swap is on, the probe block goes through it"
+    if not need_game():
+        return add(nm, "BLOCKED", "not in a game")
+    line = _mxl_line("render pool")
+    if "render pool on" not in line:
+        return add(nm, "FAIL", "the `mxl` command has no `render pool on` line: %s" % (line or "missing"))
+    ok, l1 = H("renderpool probe")
+    m = re.search(r"live=(\d+) .*size=(\d+) probe=(\S+)", " ".join(l1))
+    good = ok and m is not None and m.group(3) == "ok" and int(m.group(2)) == 0xc00000
+    add(nm, "PASS" if good else "FAIL", "%s; %s" % (line[:120], m.group(0) if m else " ".join(l1)[:120]), [], [line] + l1)
+
+
 def check_morphstress():
     """Stress for the engine crash of 2026-10-24 (`D2R.exe+0x7761DC`, the client's unit translation layer, during `morphdeath`'s
     character switch; docs/bugs.md): the Druid casts each of Median's three forms many times (the form is taken off by `setstate`
@@ -14228,7 +14342,7 @@ CHECKS = [("mxl", check_mxl), ("lockclock", check_lockout_clock), ("goblins", ch
           # lane p4-quests-verify
           ("towerkill", check_towerkill), ("lockwarp", check_lockwarp), ("tyraelwalk", check_tyraelwalk),
           ("worldstone", check_worldstone), ("hitfloor", check_hitfloor), ("strdex", check_strdex),
-          ("wwproc", check_wwproc), ("morphdeath", check_morphdeath), ("morphstress", check_morphstress), ("transguard", check_transguard), ("denboss", check_denboss), ("goblincrash", check_goblincrash), ("skillicons", check_skillicons), ("releasetables", check_releasetables), ("otherplugins", check_otherplugins), ("envguard", check_envguard),
+          ("wwproc", check_wwproc), ("morphdeath", check_morphdeath), ("morphstress", check_morphstress), ("transguard", check_transguard), ("denboss", check_denboss), ("griswold", check_griswold), ("renderpool", check_renderpool), ("goblincrash", check_goblincrash), ("skillicons", check_skillicons), ("releasetables", check_releasetables), ("otherplugins", check_otherplugins), ("envguard", check_envguard),
           ("ied", check_ied), ("iedtip", check_iedtip), ("bendshadows", check_bendshadows),
           # bugs #49 / #55
           ("equipall", check_equipall), ("typeids", check_typeids)]
