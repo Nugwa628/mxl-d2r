@@ -8,6 +8,12 @@ All releases need Diablo II: Resurrected **3.3** (Battle.net or Steam) and **D2R
 
 ## D2R-XL
 
+### 0.69.17 (2026-10-28)
+- **Fixed a crash in big fights (reported at Griswold)**: D2R draws units through a fixed 12 MB memory pool; when a
+  busy Median scene filled it, the game wrote through an empty pointer and closed (`D2R.exe+0xF3D028`). The plugin now
+  takes the extra memory from Windows when the pool is full, and the log says so once
+  (`render pool: the Renderer Pool is full ...`). ([#60](docs/bugs.md))
+
 ### 0.69.16 (2026-10-27)
 - **Socketed runes give their bonuses, and identical runes stack**: two Eld in a helm give +6 maximum damage, three
   Ral in a weapon +90% fire resistance. ([#50](docs/bugs.md))

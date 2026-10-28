@@ -19,6 +19,7 @@
 #include "sound_guard.h"
 #include "hardcore_death.h"
 #include "translation_guard.h"
+#include "render_pool.h"
 #include "required_level.h"
 #include "teleport.h"
 #include "engine_gaps_logic.h"
@@ -3434,6 +3435,18 @@ auto CmdHardcore(Ctx* c, const hcmd::Tokens& t) noexcept -> bool {
 	return true;
 }
 
+// `renderpool [probe]`: the Renderer Pool fallback's counters (render_pool.cpp, bug #60); `probe` runs one heap block through the wrapped
+// vtable (realloc, size, free) and expects the counters back where they were.
+auto CmdRenderPool(Ctx* c, const hcmd::Tokens& t) noexcept -> bool {
+	const bool probe = t.n >= 2 && hcmd::LowerEq(t.tok[1], "probe");
+	const bool ok = probe ? RenderPoolProbe() : true;
+	RenderPoolStats rp{};
+	GetRenderPoolStats(&rp);
+	Out("renderpool fallbacks=%u live=%u livebytes=%zu peak=%zu base=%llx size=%zu%s", rp.fallbacks, rp.live, rp.liveBytes, rp.peakBytes, rp.poolBase,
+	    rp.poolSize, probe ? (ok ? " probe=ok" : " probe=FAILED") : "");
+	return ok ? true : Fail(c, "renderpool: the probe block did not go through the fallback");
+}
+
 // `transguard [probe]`: the translation event guard's counters (translation_guard.cpp); `probe` feeds the hook one event with the payload
 // word of the crash reports (0x8000003F0), which must be skipped (and counts as one skipped event and one log line).
 auto CmdTransGuard(Ctx* c, const hcmd::Tokens& t) noexcept -> bool {
@@ -5437,7 +5450,7 @@ const Verb Verbs[] = {
     {"skilltab", CmdSkillTab, true}, {"strids", CmdStrIds, true}, {"str", CmdStr, true}, {"hover", CmdHover, true}, {"automap", CmdAutomap, true}, {"shop", CmdShop, false}, {"gamble", CmdGamble, false}, {"gaps", CmdGaps, false}, {"levelact", CmdLevelAct, false},
     {"dump", CmdDump, false}, {"evtrace", CmdEvTrace, false}, {"merc", CmdMerc, false}, {"mercreq", CmdMercReq, false}, {"mercprice", CmdMercPrice, false}, {"players", CmdPlayers, false}, {"tctrace", CmdTcTrace, false}, {"leash", CmdLeash, false}, {"a5done", CmdA5Done, false}, {"countessreward", CmdCountessReward, false}, {"questobj", CmdQuestObj, false}, {"questreg", CmdQuestReg, false}, {"objects", CmdObjects, false}, {"object", CmdObject, false}, {"operate", CmdOperate, false}, {"objmode", CmdObjMode, false}, {"portal", CmdPortal, false},{"hellforgereward", CmdHellforgeReward, false}, {"prisonreward", CmdPrisonReward, false}, {"hire", CmdHire, false}, {"help", CmdHelp, true},     {"menu", CmdMenu, true}, {"mstr", CmdMstr, true}, {"text", CmdText, true}, {"mapmem", CmdMapMem, true}, {"goblinsay", CmdGoblinSay, false}, {"rewardmsg", CmdRewardMsg, false}, {"rewardsnd", CmdRewardSound, true}, {"infopanel", CmdInfoPanel, true}, {"bufficons", CmdBuffIcons, true}, {"statorder", CmdStatOrder, true},
     {"mapcells", CmdMapCells, true}, {"reveal", CmdReveal, true}, {"hotkey", CmdHotkey, true}, {"wpobj", CmdWpObj, false}, {"travel", CmdTravel, true}, {"stashprobe", CmdStashProbe, true},
-    {"stashpage", CmdStashPage, true}, {"ccorpses", CmdClientCorpses, true}, {"afford", CmdAfford, false}, {"transguard", CmdTransGuard, false}, {"hc", CmdHardcore, false}, {"tpgold", CmdTeleportGold, false}, {"modewatch", CmdModeWatch, false}, {"peek", CmdPeek, false},
+    {"stashpage", CmdStashPage, true}, {"ccorpses", CmdClientCorpses, true}, {"afford", CmdAfford, false}, {"transguard", CmdTransGuard, false}, {"renderpool", CmdRenderPool, false}, {"hc", CmdHardcore, false}, {"tpgold", CmdTeleportGold, false}, {"modewatch", CmdModeWatch, false}, {"peek", CmdPeek, false},
 };
 
 const Verb* FindVerb(const char* name) noexcept {

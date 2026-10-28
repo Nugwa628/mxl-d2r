@@ -1205,3 +1205,15 @@ includes each nearby monster's area. `h spawn class count x y` calls the existin
 field position; it does not override its refusal checks. The `townmonsters` game check walks the player across the
 Tur Dulra / Scosglen border and watches a native Scytheclaw's actual room. `MXL_CONTROL=mediantowns` must reproduce
 entry and the enabled run must refuse it. Missing borders or failed setup are BLOCKED/FAIL, never PASS.
+
+## 25. Renderer Pool (lane griswold-crash, 2026-10-28; bug #60, plugin/src/render_pool.cpp)
+
+Read from the 93847 dump with `tools/d2r_find.py`; not seen in game.
+
+| What | RVA | Notes |
+|---|---|---|
+| Pool object | `0x2810ff0` | `+0` vptr (`0x1d6d770`, set by the CRT initializer `0x4ed70`; `0x1cb90b0` after the exit destructor `0x1c8e3e0`), `+8` parent allocator, `+0x10` base, `+0x18` size, `+0x20` TLSF handle, `+0x28` lock |
+| Pool start / stop | `0xf6efe0` / `0xf6ef70` | start: `0xc00000` bytes (12 MB) from the parent, TLSF create `0x1215a30`, names "Renderer Pool" / "TlsfAlloctor"; called from the renderer start `0xe213f6` ("Renderer Allocs"); stop zeroes base and size |
+| Vtable `0x1d6d770` (6 entries; also used by the allocators at `0x246b470`, `0x2677438`, `0x27d1770`, `0x27d7848`, `0x27ff098`, `0x2807d00`) | `0x82dcf0` dtor, `0x82dad0` allocate(size, align), `0x82db40` reallocate(p, size, align), `0x82dbf0` TLSF realloc(p, size), `0x82dc60` free(p), `0x82dcb0` usable size(p) | no direct calls to any of them |
+| Wrappers | `0xf6f060` allocate(size, align) (103 callers), `0xf6f0c0` free (165), `0xf6efd0` returns the object (11) | `0xf6f060` on null: `0xf6ef40` "Failed to allocate from Renderer pool!", then returns null |
+| Crash site of bug #60 | `0xf3d028` in `0xf3cfd0` | moves 0x80-byte records into the new buffer of `0xf3d587` (vector grow) from `0xf3fef1` / `0xf3f840` (`D2Render\src\model_instance.cpp`) |
