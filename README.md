@@ -1,4 +1,4 @@
-# D2R-XL (ALPHA VERSION WIP RELEASE!)
+# D2R-XL (DISCONTINUED)
 
 **D2R-XL** is a port of **Median XL 2.14.4** to **Diablo II: Resurrected 3.3**. It runs on retail D2R 3.3 (Battle.net or Steam) through
 [D2RLoader](https://d2rloader.net) 1.3.1 and a D2RLoader plugin (`mxl-core`, C++20) that re-implements the engine side of
